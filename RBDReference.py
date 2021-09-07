@@ -2,7 +2,7 @@ import numpy as np
 import copy
 np.set_printoptions(precision=4, suppress=True, linewidth = 100)
 
-class rbdReference:
+class RBDReference:
     def __init__(self, robotObj):
         self.robot = robotObj
 

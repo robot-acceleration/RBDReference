@@ -1,4 +1,4 @@
-# rbdReference
+# RBDReference
 
 A Python reference implementation of rigid body dynamics algorithms.
 
@@ -14,8 +14,8 @@ This package also depends on our [URDFParser](https://github.com/robot-accelerat
 ## Usage and API:
 This package relies on an already parsed ```robot``` object from our [URDFParser](https://github.com/robot-acceleration/URDFParser) package.
 ```python
-rbdReference = rbdReference(robot)
-outputs = rbdReference.ALGORITHM(inputs)
+RBDReference = RBDReference(robot)
+outputs = RBDReference.ALGORITHM(inputs)
 ```
 
 Currently implemented algorithms include the:
