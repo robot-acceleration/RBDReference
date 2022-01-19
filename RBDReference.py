@@ -157,7 +157,7 @@ class RBDReference:
 
         return (v,a,f)
 
-    def rnea_bpass(self, q, f):
+    def rnea_bpass(self, q, qd, f):
         # allocate memory
         n = len(q) # assuming len(q) = len(qd)
         c = np.zeros(n)
@@ -174,13 +174,17 @@ class RBDReference:
                 temp = np.matmul(np.transpose(Xmat),f[:,ind])
                 f[:,parent_ind] = f[:,parent_ind] + temp.flatten()
 
+        # add velocity damping (defaults to 0)
+        for k in range(n):
+            c[k] += self.robot.get_damping_by_id(k) * qd[k]
+
         return (c,f)
 
     def rnea(self, q, qd, qdd = None, GRAVITY = -9.81):
         # forward pass
         (v,a,f) = self.rnea_fpass(q, qd, qdd, GRAVITY)
         # backward pass
-        (c,f) = self.rnea_bpass(q, f)
+        (c,f) = self.rnea_bpass(q, qd, f)
 
         return (c,v,a,f)
 
@@ -291,6 +295,10 @@ class RBDReference:
             if parent_ind != -1:
                 Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
                 df_dqd[:,:,parent_ind] += np.matmul(np.transpose(Xmat),df_dqd[:,:,ind]) 
+
+        # add in the damping
+        for ind in range(n):
+            dc_dqd[ind,ind] += self.robot.get_damping_by_id(ind)
 
         return dc_dqd
 
