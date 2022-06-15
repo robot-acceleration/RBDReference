@@ -157,7 +157,7 @@ class RBDReference:
 
         return (v,a,f)
 
-    def rnea_bpass(self, q, qd, f):
+    def rnea_bpass(self, q, qd, f, USE_VELOCITY_DAMPING = False):
         # allocate memory
         n = len(q) # assuming len(q) = len(qd)
         c = np.zeros(n)
@@ -175,16 +175,17 @@ class RBDReference:
                 f[:,parent_ind] = f[:,parent_ind] + temp.flatten()
 
         # add velocity damping (defaults to 0)
-        for k in range(n):
-            c[k] += self.robot.get_damping_by_id(k) * qd[k]
+        if USE_VELOCITY_DAMPING:
+            for k in range(n):
+                c[k] += self.robot.get_damping_by_id(k) * qd[k]
 
         return (c,f)
 
-    def rnea(self, q, qd, qdd = None, GRAVITY = -9.81):
+    def rnea(self, q, qd, qdd = None, GRAVITY = -9.81, USE_VELOCITY_DAMPING = False):
         # forward pass
         (v,a,f) = self.rnea_fpass(q, qd, qdd, GRAVITY)
         # backward pass
-        (c,f) = self.rnea_bpass(q, qd, f)
+        (c,f) = self.rnea_bpass(q, qd, f, USE_VELOCITY_DAMPING)
 
         return (c,v,a,f)
 
@@ -280,7 +281,7 @@ class RBDReference:
 
         return dc_dq
 
-    def rnea_grad_bpass_dqd(self, q, df_dqd):
+    def rnea_grad_bpass_dqd(self, q, df_dqd, USE_VELOCITY_DAMPING = False):
         
         # allocate memory
         n = len(q) # assuming len(q) = len(qd)
@@ -297,12 +298,13 @@ class RBDReference:
                 df_dqd[:,:,parent_ind] += np.matmul(np.transpose(Xmat),df_dqd[:,:,ind]) 
 
         # add in the damping
-        for ind in range(n):
-            dc_dqd[ind,ind] += self.robot.get_damping_by_id(ind)
+        if USE_VELOCITY_DAMPING:
+            for ind in range(n):
+                dc_dqd[ind,ind] += self.robot.get_damping_by_id(ind)
 
         return dc_dqd
 
-    def rnea_grad(self, q, qd, qdd = None, GRAVITY = -9.81):
+    def rnea_grad(self, q, qd, qdd = None, GRAVITY = -9.81, USE_VELOCITY_DAMPING = False):
         (c, v, a, f) = self.rnea(q, qd, qdd, GRAVITY)
 
         # forward pass, dq
@@ -315,7 +317,7 @@ class RBDReference:
         dc_dq = self.rnea_grad_bpass_dq(q, f, df_dq)
 
         # backward pass, dqd
-        dc_dqd = self.rnea_grad_bpass_dqd(q, df_dqd)
+        dc_dqd = self.rnea_grad_bpass_dqd(q, df_dqd, USE_VELOCITY_DAMPING)
 
         dc_du = np.hstack((dc_dq,dc_dqd))
         return dc_du
