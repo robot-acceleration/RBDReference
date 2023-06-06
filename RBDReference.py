@@ -438,7 +438,7 @@ class RBDReference:
 
             vcross=np.array([[0, -v[:,ind][2], v[:,ind][1], 0, 0, 0],
             [v[:,ind][2], 0, -v[:,ind][0], 0, 0, 0], 
-            [-v[:,ind][1], v[:,ind]S[0], 0, 0, 0, 0],
+            [-v[:,ind][1], v[:,ind][0], 0, 0, 0, 0],
             [0, -v[:,ind][5], v[:,ind][4], 0, -v[:,ind][2], v[:,ind][1]], 
             [v[:,ind][5],0, -v[:,ind][3], v[:,ind][2], 0, -v[:,ind][0]],
             [-v[:,ind][4], v[:,ind][3], 0, -v[:,ind][1], v[:,ind][0], 0]])
