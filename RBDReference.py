@@ -4,95 +4,32 @@ np.set_printoptions(precision=4, suppress=True, linewidth = 100)
 
 class RBDReference:
     def __init__(self, robotObj):
-        self.robot = robotObj
+        self.robot = robotObj # instance of Robot Object class created by URDFparser``
 
-    def mxS(self, S, vec, alpha = 1.0):
-        if S[0] == 1:
-            return self.mx1(vec,alpha)
-        elif S[1] == 1:
-            return self.mx2(vec,alpha)
-        elif S[2] == 1:
-            return self.mx3(vec,alpha)
-        elif S[3] == 1:
-            return self.mx4(vec,alpha)
-        elif S[4] == 1:
-            return self.mx5(vec,alpha)
-        elif S[5] == 1:
-            return self.mx6(vec,alpha)
-        else:
-            return np.zeros((6))
+    def cross_operator(self, v):
+        # for any vector v, computes the operator v x 
+        # vec x = [wx   0]
+        #         [vox wx]
+        v_cross = np.array([0, -v[2], v[1], 0, 0, 0,
+                            v[2], 0, -v[0], 0, 0, 0,
+                            -v[1], v[0], 0, 0, 0, 0,
+                            0, -v[5], v[4], 0, -v[2], v[1], 
+                            v[5], 0, -v[3], v[2], 0, -v[0],
+                            -v[4], v[3], 0, -v[1], v[0], 0]
+                          ).reshape(6,6)
+        return(v_cross)
+    
+    def dual_cross_operator(self, v):
+        return(-1 * self.cross_operator(v).T)
 
-    def mx1(self, vec, alpha = 1.0):
-        vecX = np.zeros((6))
-        try:
-            vecX[1] = vec[2]*alpha
-            vecX[2] = -vec[1]*alpha
-            vecX[4] = vec[5]*alpha
-            vecX[5] = -vec[4]*alpha
-        except:
-            vecX[1] = vec[0,2]*alpha
-            vecX[2] = -vec[0,1]*alpha
-            vecX[4] = vec[0,5]*alpha
-            vecX[5] = -vec[0,4]*alpha
-        return vecX
-
-    def mx2(self, vec, alpha = 1.0):
-        vecX = np.zeros((6))
-        try:
-            vecX[0] = -vec[2]*alpha
-            vecX[2] = vec[0]*alpha
-            vecX[3] = -vec[5]*alpha
-            vecX[5] = vec[3]*alpha
-        except:
-            vecX[0] = -vec[0,2]*alpha
-            vecX[2] = vec[0,0]*alpha
-            vecX[3] = -vec[0,5]*alpha
-            vecX[5] = vec[0,3]*alpha
-        return vecX
-
-    def mx3(self, vec, alpha = 1.0):
-        vecX = np.zeros((6))
-        try:
-            vecX[0] = vec[1]*alpha
-            vecX[1] = -vec[0]*alpha
-            vecX[3] = vec[4]*alpha
-            vecX[4] = -vec[3]*alpha
-        except:
-            vecX[0] = vec[0,1]*alpha
-            vecX[1] = -vec[0,0]*alpha
-            vecX[3] = vec[0,4]*alpha
-            vecX[4] = -vec[0,3]*alpha
-        return vecX
-
-    def mx4(self, vec, alpha = 1.0):
-        vecX = np.zeros((6))
-        try:
-            vecX[4] = vec[2]*alpha
-            vecX[5] = -vec[1]*alpha
-        except:
-            vecX[4] = vec[0,2]*alpha
-            vecX[5] = -vec[0,1]*alpha
-        return vecX
-
-    def mx5(self, vec, alpha = 1.0):
-        vecX = np.zeros((6))
-        try:
-            vecX[3] = -vec[2]*alpha
-            vecX[5] = vec[0]*alpha
-        except:
-            vecX[3] = -vec[0,2]*alpha
-            vecX[5] = vec[0,0]*alpha
-        return vecX
-
-    def mx6(self, vec, alpha = 1.0):
-        vecX = np.zeros((6))
-        try:
-            vecX[3] = vec[1]*alpha
-            vecX[4] = -vec[0]*alpha
-        except:
-            vecX[3] = vec[0,1]*alpha
-            vecX[4] = -vec[0,0]*alpha
-        return vecX
+    def mxS(self, S, vec, alpha=1.0):
+        # returns the spatial cross product between vectors S and vec. vec=[v0, v1 ... vn] and S = [s0, s1, s2, s3, s4, s5]
+        # derivative of spatial motion vector = v x m
+        return(alpha * np.dot(self.cross_operator(vec), S))        
+    
+    def fxv_simple(self, m, f):
+        # force spatial vector cross product. 
+        return(np.dot(self.dual_cross_operator(m), f))
 
     def fxv(self, fxVec, timesVec):
         # Fx(fxVec)*timesVec
@@ -112,9 +49,13 @@ class RBDReference:
         return result
 
     def fxS(self, S, vec, alpha = 1.0):
+        # force spatial cross product with motion subspace 
         return -self.mxS(S, vec, alpha)
 
     def vxIv(self, vec, Imat):
+        # necessary component in differentiating Iv (product rule).
+        # We express I_dot x v as v x (Iv) (see Featherstone 2.14)
+        # our core equation of motion is f = d/dt (Iv) = Ia + vx* Iv
         temp = np.matmul(Imat,vec)
         vecXIvec = np.zeros((6))
         vecXIvec[0] = -vec[2]*temp[1]   +  vec[1]*temp[2] + -vec[2+3]*temp[1+3] +  vec[1+3]*temp[2+3]
@@ -125,28 +66,53 @@ class RBDReference:
         vecXIvec[5] = -vec[1]*temp[0+3] +  vec[0]*temp[1+3]
         return vecXIvec
 
+    """
+    Recursive Newton-Euler Method is a recursive inverse dynamics algorithm to calculate the forces required for a specified trajectory
+
+    RNEA divided into 3 parts: 
+        1) calculate the velocity and acceleration of each body in the tree
+        2) Calculate the forces necessary to produce these accelertions
+        3) Calculate the forces transmitted across the joints from the forces acting on the bodies
+    """
+
+    
     def rnea_fpass(self, q, qd, qdd = None, GRAVITY = -9.81):
+        """
+        Forward Pass for RNEA algorithm. Computes the velocity and acceleration of each body in the tree necessary to produce a certain trajectory
+        
+        OUTPUT: 
+        v : input qd is specifying value within configuration space with assumption of one degree of freedom. 
+        Output velocity is in general body coordinates and specifies motion in full 6 degrees of freedom
+        """
+        assert len(q) == len(qd), "Invalid Trajectories"
+        # not sure should equal num links or num joints. 
+        assert len(q) == self.robot.get_num_joints(), "Invalid Trajectory, must specify coordinate for every body" 
         # allocate memory
-        n = len(qd)
+        n = len(q)
         v = np.zeros((6,n))
         a = np.zeros((6,n))
         f = np.zeros((6,n))
-        gravity_vec = np.zeros((6))
-        gravity_vec[5] = -GRAVITY # a_base is gravity vec
-        
+
+        gravity_vec = np.zeros((6)) # model gravity as a fictitious base acceleration. 
+        # all forces subsequently offset by gravity. 
+        gravity_vec[5] = -GRAVITY # a_base is gravity vec, linear in z direction
+
         # forward pass
+        # vi = vparent + Si * qd_i
+        # differentiate for ai = aparent + Si * qddi + Sdi * qdi
+        
         for ind in range(n):
             parent_ind = self.robot.get_parent_id(ind)
-            Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
-            S = self.robot.get_S_by_id(ind)
+            Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind]) # the coordinate transform that brings into base reference frame
+            S = self.robot.get_S_by_id(ind) # Subspace matrix
             # compute v and a
             if parent_ind == -1: # parent is base
                 # v_base is zero so v[:,ind] remains 0
                 a[:,ind] = np.matmul(Xmat,gravity_vec)
             else:
-                v[:,ind] = np.matmul(Xmat,v[:,parent_ind])
+                v[:,ind] = np.matmul(Xmat,v[:,parent_ind]) # velocity of parent in base coordinates. 
                 a[:,ind] = np.matmul(Xmat,a[:,parent_ind])
-            v[:,ind] += S*qd[ind]
+            v[:,ind] += S*qd[ind] # S turns config space into actual velocity
             a[:,ind] += self.mxS(S,v[:,ind],qd[ind])
             if qdd is not None:
                 a[:,ind] += S*qdd[ind]
@@ -163,6 +129,9 @@ class RBDReference:
         c = np.zeros(n)
         
         # backward pass
+        # seek to calculate force transmitted from body i across joint i (fi) from the outside in.
+        # fi = fi^B (net force) - fi^x (external forces, assumed to be known) - sum{f^j (all forces from children)}. 
+        # Start with outermost as set of children is empty and go backwards to base.
         for ind in range(n-1,-1,-1):
             S = self.robot.get_S_by_id(ind)
             # compute c
@@ -182,6 +151,25 @@ class RBDReference:
         return (c,f)
 
     def rnea(self, q, qd, qdd = None, GRAVITY = -9.81, USE_VELOCITY_DAMPING = False):
+        """
+        Recursive Newton-Euler Method is a recursive inverse dynamics algorithm to calculate the forces required for a specified trajectory
+
+        RNEA divided into 3 parts: 
+            1) calculate the velocity and acceleration of each body in the tree
+            2) Calculate the forces necessary to produce these accelertions
+            3) Calculate the forces transmitted across the joints from the forces acting on the bodies
+            
+        INPUT:
+        q, qd, qdd: position, velocity, acceleration. Nx1 arrays where N is the number of bodies
+        GRAVITY - gravitational field of the body; default is earth surface gravity, 9.81
+        USE_VELOCITY_DAMPING: flag for whether velocity is damped, representing ___
+        
+        OUTPUTS: 
+        c: Coriolis terms and other forces potentially be applied to the system. 
+        v: velocity of each joint in world base coordinates rather than motion subspace
+        a: acceleration of each joint in world base coordinates rather than motion subspace
+        f: forces that joints must apply to produce trajectory
+        """
         # forward pass
         (v,a,f) = self.rnea_fpass(q, qd, qdd, GRAVITY)
         # backward pass
@@ -305,6 +293,13 @@ class RBDReference:
         return dc_dqd
 
     def rnea_grad(self, q, qd, qdd = None, GRAVITY = -9.81, USE_VELOCITY_DAMPING = False):
+        # instead of passing in trajectory, what if we want our planning algorithm to solve for the optimal trajectory?
+        """
+        The gradients of inverse dynamics can be very extremely useful inputs into trajectory optimization algorithmss.
+        Input: trajectory, including position, velocity, and acceleration
+        Output: Computes the gradient of joint forces with respect to the positions and velocities. 
+        """ 
+        
         (c, v, a, f) = self.rnea(q, qd, qdd, GRAVITY)
 
         # forward pass, dq
@@ -378,7 +373,11 @@ class RBDReference:
 
     def minv(self, q, output_dense = True):
         # based on https://www.researchgate.net/publication/343098270_Analytical_Inverse_of_the_Joint_Space_Inertia_Matrix
-
+        """ Computes the analytical inverse of the joint space inertia matrix
+        CRBA calculates the joint space inertia matrix H to represent the composite inertia
+        This is used in the fundamental motion equation H qdd + C = Tau
+        Forward dynamics roughly calculates acceleration as H_inv ( Tau - C); analytic inverse - benchmark against Pinocchio
+        """
         # backward pass
         (Minv, F, U, Dinv) = self.minv_bpass(q)
 
@@ -394,3 +393,133 @@ class RBDReference:
                         Minv[row,col] = Minv[col,row]
 
         return Minv
+
+    def crm(v):
+        if len(v) == 6:
+            vcross = np.array([0, -v[3], v[2], 0,0,0], [v[3], 0, -v[1], 0,0,0], [-v[2], v[1], 0, 0,0,0], [0, -v[6], v[5], 0,-v[3],v[2]], [v[6], 0, -v[4], v[3],0,-v[1]], [-v[5], v[4], 0, -v[2],v[1],0])
+        else:
+            vcross = np.array([0, 0, 0], [v[3], 0, -v[1]], [-v[2], v[1], 0])
+        return vcross
+
+    def aba(self, q, qd, tau, GRAVITY = -9.81):
+       # allocate memory
+        n = len(qd)
+        v = np.zeros((6,n))
+        c = np.zeros((6,n))
+        a = np.zeros((6,n))
+        f = np.zeros((6,n))
+        d = np.zeros(n)
+        U = np.zeros((6,n))
+        u = np.zeros(n)
+        IA = np.zeros((6,6,n))
+        pA = np.zeros((6,n))
+        qdd = np.zeros(n)
+        
+        
+        gravity_vec = np.zeros((6))
+        gravity_vec[5] = -GRAVITY # a_base is gravity vec
+                 
+        for ind in range(n):
+            parent_ind = self.robot.get_parent_id(ind)
+            Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
+            S = self.robot.get_S_by_id(ind)
+
+            if parent_ind == -1: # parent is base
+                v[:,ind] = S*qd[ind]
+                
+            else:
+                v[:,ind] = np.matmul(Xmat,v[:,parent_ind])
+                v[:,ind] += S*qd[ind]
+                c[:,ind] = self.mxS(S,v[:,ind],qd[ind])
+
+            Imat = self.robot.get_Imat_by_id(ind)
+
+            IA[:,:,ind] = Imat
+
+            vcross=np.array([[0, -v[:,ind][2], v[:,ind][1], 0, 0, 0],
+            [v[:,ind][2], 0, -v[:,ind][0], 0, 0, 0], 
+            [-v[:,ind][1], v[:,ind][0], 0, 0, 0, 0],
+            [0, -v[:,ind][5], v[:,ind][4], 0, -v[:,ind][2], v[:,ind][1]], 
+            [v[:,ind][5],0, -v[:,ind][3], v[:,ind][2], 0, -v[:,ind][0]],
+            [-v[:,ind][4], v[:,ind][3], 0, -v[:,ind][1], v[:,ind][0], 0]])
+
+            crf=-np.transpose(vcross)
+            temp=np.matmul(crf,Imat)
+
+            pA[:,ind]=np.matmul(temp,v[:,ind])[0]
+        
+        for ind in range(n-1,-1,-1):
+            S = self.robot.get_S_by_id(ind)
+            parent_ind = self.robot.get_parent_id(ind)
+
+            U[:,ind] = np.matmul(IA[:,:,ind],S)
+            d[ind] = np.matmul(np.transpose(S),U[:,ind])
+            u[ind] = tau[ind] - np.matmul(np.transpose(S),pA[:,ind])
+
+            if parent_ind != -1:
+
+                rightSide=np.reshape(U[:,ind],(6,1))@np.reshape(U[:,ind],(6,1)).T/d[ind]
+                Ia = IA[:,:,ind] - rightSide
+
+                pa = pA[:,ind] + np.matmul(Ia, c[:,ind]) + U[:,ind]*u[ind]/d[ind]
+
+                Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
+                temp = np.matmul(np.transpose(Xmat), Ia)
+
+                IA[:,:,parent_ind] = IA[:,:,parent_ind] + np.matmul(temp,Xmat)
+
+                temp = np.matmul(np.transpose(Xmat), pa)
+                pA[:,parent_ind]=pA[:,parent_ind] + temp.flatten()
+                                             
+        for ind in range(n):
+
+            parent_ind = self.robot.get_parent_id(ind)
+            Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
+
+            if parent_ind == -1: # parent is base
+                a[:,ind] = np.matmul(Xmat,gravity_vec) + c[:,ind]
+            else:
+                a[:,ind] = np.matmul(Xmat, a[:,parent_ind]) + c[:,ind]
+
+            S = self.robot.get_S_by_id(ind)
+            temp = u[ind] - np.matmul(np.transpose(U[:,ind]),a[:,ind])
+            qdd[ind] = temp / d[ind]
+            a[:,ind] = a[:,ind] + qdd[ind]*S
+        
+        return qdd
+    
+    def crba( self, q, qd, tau):
+        n = len(qd)
+        
+        C = self.rnea(q, qd, qdd = None, GRAVITY = -9.81)[0]
+
+        IC = copy.deepcopy(self.robot.get_Imats_dict_by_id())# composite inertia calculation
+
+        for ind in range(n-1,-1,-1):
+            parent_ind = self.robot.get_parent_id(ind)
+            Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
+
+            if parent_ind != -1:
+                IC[parent_ind] = IC[parent_ind] + np.matmul(np.matmul(Xmat.T, IC[ind]),Xmat);
+
+        H = np.zeros((n,n))
+
+        for ind in range(n):
+
+            S = self.robot.get_S_by_id(ind)
+            fh = np.matmul(IC[ind],S)
+            H[ind,ind] = np.matmul(S,fh)
+            j = ind;
+
+            while self.robot.get_parent_id(j) > -1:
+                Xmat = self.robot.get_Xmat_Func_by_id(j)(q[j])
+                fh = np.matmul(Xmat.T,fh);
+                j = self.robot.get_parent_id(j)
+                S = self.robot.get_S_by_id(j)
+                H[ind,j] = np.matmul(S.T, fh);
+                H[j,ind] = H[ind,j];
+
+        sub=np.subtract(tau,C)
+        return H
+
+    
