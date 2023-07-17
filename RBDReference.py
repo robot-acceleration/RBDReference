@@ -604,8 +604,126 @@ class RBDReference:
         C = self.rnea(q, qd, qdd = None, GRAVITY = -9.81)[0]
         
         IC = copy.deepcopy(self.robot.get_Imats_dict_by_id())# composite inertia calculation
+        H = np.zeros((n,n))
+        alpha = np.zeros(len(IC))
+        alpha = [(i,0) for i in alpha]
 
-        for ind in range(n-1,-1,-1):
+        beta = np.zeros(len(IC))
+        beta = [(i,0) for i in alpha]
+
+        j_ind = np.zeros(n)
+        fh = np.zeros((n,6))
+
+        n_bfs_levels = self.robot.get_max_bfs_level()
+        for bfs_level in range(n_bfs_levels,0,-1):
+            inds = self.robot.get_ids_by_bfs_level(bfs_level)	
+            for ind in inds: #this is parallel
+                #print("ind:", ind)
+                #print("parent ind:", parent_ind)
+                #print("IC[", ind, "] = ", IC[ind])
+                Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
+                #print("Xmat.T = ", Xmat.T)
+                #print("Xmat = ", Xmat)
+                alpha[ind] = Xmat.T@IC[ind]
+                #print("alpha = ", alpha[ind])
+            for ind in inds:
+                #print("ind:", ind)
+                parent_ind = self.robot.get_parent_id(ind)
+                Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
+                #print("IC[parent_ind] = ", IC[parent_ind])
+                beta[ind]= np.matmul(alpha[ind],Xmat)
+                #print("beta[ind] = ", beta[ind])
+                IC[parent_ind] += beta[ind]
+                #print("IC[parent_ind] = ", IC[parent_ind])
+
+        # Calculation of fh and H[ind, ind] (second loop)
+        """for ind in range(n-1, -1, -1): # in parallel
+            #print("ind:", ind)
+            S = self.robot.get_S_by_id(ind)
+            #print("IC[ind] = ", IC[ind])
+            fh = np.matmul(IC[ind], S)
+            #print("fh", fh)
+            H[ind, ind] = np.matmul(S, fh)
+            #print("H[ind, ind]", H[ind, ind])
+            j_ind[ind] = ind
+          
+        print("H", H)"""
+        # Calculation of H[ind, j] and H[j, ind] (third loop)
+        for ind in range(n-1, -1, -1): # in parallel
+            #print("ind", ind)
+            S = self.robot.get_S_by_id(ind)
+            fh[ind] = np.matmul(IC[ind],S)
+            #print("IC", IC[ind])
+            #print("fh", fh[ind])
+        #print("fh ====== ")
+        #print(fh)
+        for ind in range(n-1, -1, -1): # in parallel
+            S = self.robot.get_S_by_id(ind)
+            H[ind, ind] = S.T@fh[ind]
+
+        #print("H", H)
+        for bfs_level in range(n_bfs_levels,0,-1):  # print out c++ in a python loop
+            inds = self.robot.get_ids_by_bfs_level(bfs_level)
+            #print("bfs_level)", bfs_level)
+            #print("inds", inds)
+            parent_inds = copy.deepcopy(inds) #parent_inds as temp array in c++
+            
+            for parent_level in range(bfs_level): # print out c++ in a python loop
+                print("parent_level", parent_level)
+                for parallel_index in range(len(inds)): # parallel loop\
+                    current_joint = inds[parallel_index]
+                    print("parallel_index", parallel_index)
+                    print("current joint", inds[parallel_index])
+                    print("current parent", parent_inds[parallel_index])
+                    if parent_inds[parallel_index] != -1:
+                #for ind in range(n-1, 0, -1):
+                #for ind in inds:
+                    #print("ind", ind)
+                    #if j_ind[ind] != -1:
+                        # get X
+                        curr_parent = parent_inds[parallel_index]
+                        Xmat = self.robot.get_Xmat_Func_by_id(curr_parent)(q[curr_parent])
+
+                        print("fh pre", fh[current_joint])
+                        print("XMAT.T ", Xmat.T)
+                        fh[current_joint] = Xmat.T@fh[current_joint]
+                        print("fh", fh[current_joint])
+                        print("fh", fh)
+
+
+
+                        # update parent
+                        parent_inds[parallel_index] = self.robot.get_parent_id(curr_parent)
+                        curr_parent = parent_inds[parallel_index]
+                        print("new parent", curr_parent)
+
+                        #sync and new loop 
+
+                #for ind in range(n-1, 0, -1):
+                #for ind in inds:
+                    #print("ind", ind)
+                    #if j_ind[ind] != -1:
+                        # get the parent S
+                        S_parent = self.robot.get_S_by_id(curr_parent)
+                        # compute H[i,j]
+                        H[current_joint, curr_parent] = np.matmul(S_parent.T, fh[current_joint])
+                        print("H = S_parent.T, fh[current_joint]",H[current_joint, curr_parent])
+                        H[curr_parent, current_joint] = H[current_joint, curr_parent] 
+                        print("H", H)
+                    else:
+                        print("HOW IN THE WORLD DID WE EVER GET HERE?")
+        
+        print("H", H)
+
+        """while self.robot.get_parent_id(j) > -1:
+                Xmat = self.robot.get_Xmat_Func_by_id(j)(q[j])
+                fh = np.matmul(Xmat.T, fh)
+                j = self.robot.get_parent_id(j)
+                S = self.robot.get_S_by_id(j)
+                H[ind, j] = np.matmul(S.T, fh)
+                H[j, ind] = H[ind, j]"""
+
+        """for ind in range(n-1,-1,-1):
             parent_ind = self.robot.get_parent_id(ind)
             Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
 
@@ -629,7 +747,7 @@ class RBDReference:
                 H[ind,j] = np.matmul(S.T, fh)
                 H[j,ind] = H[ind,j]
 
-        sub=np.subtract(tau,C) 
+        sub=np.subtract(tau,C) """
         return H
     
     def crba_parallel( self, q, qd, tau):
